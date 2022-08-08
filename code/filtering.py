@@ -28,12 +28,6 @@ import os
 os.environ['WEBBPSF_PATH'] = '/orange/adamginsburg/jwst/webbpsf-data/'
 import webbpsf
 
-if __name__ == "__main__":
-    im1 = fits.open('/orange/adamginsburg/jwst/jw02731/L3/t/jw02731-o001_t017_nircam_clear-f444w_i2d.fits')
-    data = im1[1].data
-    basetable = Table.read('/orange/adamginsburg/jwst/jw02731/L3/t/jw02731-o001_t017_nircam_clear-f444w_cat.ecsv')
-
-
 
 def get_fwhm(header, instrument_replacement='NIRCam'):
     """
@@ -70,8 +64,10 @@ def get_fwhm(header, instrument_replacement='NIRCam'):
 
 
 def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=False, save_products=True,
+                        path_prefix='./',
                         psf_size=31, nsigma_threshold=10):
     """
+    holy side effects batman
     """
 
     fwhm, fwhm_pix = get_fwhm(header)
@@ -199,8 +195,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
         # fits.PrimaryHDU(data=medfilt_masked, header=im1[1].header).writeto('F444W_filter-based-background.fits', overwrite=True)
 
-        fits.PrimaryHDU(data=conv, header=header).writeto(f'{filtername}_convolution-based-background.fits', overwrite=True)
-        fits.PrimaryHDU(data=filtered_data, header=header).writeto(f'{filtername}_filter-based-background-subtraction.fits', overwrite=True)
+        fits.PrimaryHDU(data=conv, header=header).writeto(f'{path_prefix}/{filtername}_convolution-based-background.fits', overwrite=True)
+        fits.PrimaryHDU(data=filtered_data, header=header).writeto(f'{path_prefix}/{filtername}_filter-based-background-subtraction.fits', overwrite=True)
 
 
 
@@ -268,9 +264,6 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
                                               niters=2, fitshape=(11, 11), aperture_radius=2*fwhm_pix)
 
 
-
-
-
     # operate on the full data
     log.info(f"Doing full photometry.  t={time.time()-t0:0.1f}")
     result_full = phot(np.nan_to_num(filtered_data))
@@ -278,15 +271,15 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     resid = phot.get_residual_image()
     log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
     if save_products:
-        result_full.write(f'{filtername}_fullfield_ePSF_photometry.ecsv', overwrite=True)
-        fits.PrimaryHDU(data=resid, header=header).writeto(f'{filtername}_psfphot_stars_removed.fits', overwrite=True)
+        result_full.write(f'{path_prefix}/{filtername}_fullfield_ePSF_photometry.ecsv', overwrite=True)
+        fits.PrimaryHDU(data=resid, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed.fits', overwrite=True)
 
     resid_orig = photutils.psf.utils.subtract_psf(data, epsf_quadratic_filtered, result_full)
     log.info(f"Done with final star subtraction from original data.  t={time.time()-t0:0.1f}")
     if save_products:
-        fits.PrimaryHDU(data=resid_orig, header=header).writeto(f'{filtername}_psfphot_stars_removed.fits', overwrite=True)
+        fits.PrimaryHDU(data=resid_orig, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed.fits', overwrite=True)
 
     resid_orig_filled = photutils.psf.utils.subtract_psf(datafilt_conv_psf, epsf_quadratic_filtered, result_full)
     log.info(f"Done with final star subtraction from original filled in data.  t={time.time()-t0:0.1f}")
     if save_products:
-        fits.PrimaryHDU(data=resid_orig_filled, header=header).writeto(f'{filtername}_psfphot_stars_filled_then_removed.fits', overwrite=True)
+        fits.PrimaryHDU(data=resid_orig_filled, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_filled_then_removed.fits', overwrite=True)
