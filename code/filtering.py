@@ -107,7 +107,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     log.info(f"Calculating PSF kernel done at {time.time()-t0:0.1f}s")
 
     # replace the saturated pixels with interpolated ones
-    datafilt_conv_psf = (convolve(medfiltsub, psf_kernel, nan_treatment='interpolate'))
+    datafilt_conv_psf = (convolve(medfilt_sub, psf_kernel, nan_treatment='interpolate'))
     log.info(f"Convolution done at {time.time()-t0:0.1f}s")
 
     filled_in_pixels = (data==0) & ~np.isnan(datafilt_conv_psf)
@@ -237,7 +237,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     daofind_fin = DAOStarFinder(threshold=nsigma_threshold * filtered_errest, fwhm=fwhm_pix, roundhi=1.0, roundlo=-1.0,
                                 sharplo=0.30, sharphi=1.40)
     finstars = daofind_fin(filtered_data)
-    log.info(f"First-pass starfinding calculation done at {time.time()-t0:0.1f}s.  Found {len(finstars}) stars.")
+    log.info(f"First-pass starfinding calculation done at {time.time()-t0:0.1f}s.  Found {len(finstars)} stars.")
 
     # criteria are based on examining some plots; they probably don't hold universally
     def filtered_finder(data, *args, **kwargs):

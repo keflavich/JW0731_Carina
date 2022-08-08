@@ -5,7 +5,6 @@ import os
 
 
 basepath = '/orange/adamginsburg/jwst/jw02731/'
-os.chdir(basepath)
 
 
 filenames = [
@@ -26,7 +25,10 @@ for fn_ in filenames:
 
     fh = fits.open(fn)
     data = fh[1].data
-    header = fh[1].header
+
+    # metadata are only in header[0], but WCS are in header[1]
+    header = fh[0].header
+    header.update(fh[1].header)
 
     t0 = time.time()
     print(f"Started {fn} at t={t0:0.1f}")
