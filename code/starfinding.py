@@ -1,21 +1,32 @@
 from scipy.ndimage import label, find_objects, center_of_mass, sum_labels 
+from tqdm.notebook import tqdm
 import numpy as np
 from scipy import ndimage
 from astropy.table import Table
 
-def is_star(data, labelmask):
+def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500):
     """
     Attempt to determine if a collection of blank pixels is actually a star by
     assuming the pixels closest to the center will be brighter than their
     surroundings
     """
+    slc = tuple(slice(max(ss.start-rindsize, 0),
+                      min(ss.stop+rindsize, shp)) for ss,shp in zip(slc, data.shape))
+
+    labelmask = sources[slc] == srcid
+    assert np.any(labelmask)
+
     rind1 = ndimage.binary_dilation(labelmask).astype('bool')
     rind2 = ndimage.binary_dilation(rind1).astype('bool')
-    rind2sum = data[rind2 &~ rind1].sum()
-    rind1sum = data[rind1 &~ labelmask.astype('bool')].sum()
-    return rind1sum > rind2sum
+    rind2sum = data[slc][rind2 & ~rind1].sum()
+    rind1sum = data[slc][rind1 & ~labelmask].sum()
 
-def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, *args, **kwargs):
+    rind3 = ndimage.binary_dilation(labelmask, iterations=3)
+    rind3sum = data[slc][rind3 & ~labelmask].sum()
+
+    return (rind1sum > rind2sum) or rind3sum > min_flux
+
+def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500, rindsize=3, *args, **kwargs):
     """
     Create a saturated star finder that can select on the number of saturated pixels and the
     distance from the edge of the image
@@ -31,12 +42,10 @@ def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, *args, **kwargs
             raise ValueError("No saturated sources found")
         slices = find_objects(sources)
 
-        sources, nsources = label(saturated)
-        slices = find_objects(sources)
         coms = center_of_mass(saturated, sources, np.arange(nsources))
-        sizes = sum_labels(saturated, sources, np.arange(nsources))
-
         coms = np.array(coms)
+
+        sizes = sum_labels(saturated, sources, np.arange(nsources))
         msfe = min_sep_from_edge
 
         sizes_ok = (sizes < max_size) & (sizes > min_size)
@@ -47,10 +56,10 @@ def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, *args, **kwargs
             (coms[:,0] < data.shape[0]-msfe)
         )
         all_ok = sizes_ok & coms_finite & coms_inbounds
-        #is_star_ok = np.array([szok and is_star(data[slcs], sources[slcs] == srcid)
-        #                       for srcid, (szok, slcs) in enumerate(tqdm(zip(all_ok, slices)))])
-        #all_ok &= is_star_ok
-        #is_star={is_star_ok.sum()},
+        is_star_ok = np.array([szok and is_star(data, sources, srcid+1, slcs, min_flux=min_flux, rindsize=rindsize)
+                               for srcid, (szok, slcs) in enumerate(tqdm(zip(all_ok, slices)))])
+        all_ok &= is_star_ok
+        print(f"is_star={is_star_ok.sum()}, ", end="")
         print(f"sizes={sizes_ok.sum()}, coms_finite={coms_finite.sum()}, coms_inbounds={coms_inbounds.sum()}, total={all_ok.sum()} candidates")
 
 
