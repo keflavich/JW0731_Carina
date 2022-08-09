@@ -74,6 +74,9 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     fwhm, fwhm_pix = get_fwhm(header)
     filtername = header['FILTER']
 
+
+    ### First iteration: simple median filter to produce ePSF estimate
+
     t0 = time.time()
 
     medfilt = median_filter(data, size=medfilt_size)

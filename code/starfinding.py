@@ -16,15 +16,15 @@ def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500):
     labelmask = sources[slc] == srcid
     assert np.any(labelmask)
 
-    rind1 = ndimage.binary_dilation(labelmask).astype('bool')
-    rind2 = ndimage.binary_dilation(rind1).astype('bool')
+    rind1 = ndimage.binary_dilation(labelmask, iterations=2).astype('bool')
+    rind2 = ndimage.binary_dilation(rind1, iterations=2).astype('bool')
     rind2sum = data[slc][rind2 & ~rind1].sum()
     rind1sum = data[slc][rind1 & ~labelmask].sum()
 
-    rind3 = ndimage.binary_dilation(labelmask, iterations=3)
+    rind3 = ndimage.binary_dilation(labelmask, iterations=rindsize)
     rind3sum = data[slc][rind3 & ~labelmask].sum()
 
-    return (rind1sum > rind2sum) or rind3sum > min_flux
+    return (rind1sum > rind2sum) and rind3sum > min_flux
 
 def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500, rindsize=3, *args, **kwargs):
     """
