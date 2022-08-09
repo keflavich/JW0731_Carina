@@ -1,4 +1,5 @@
 import photutils
+import regions
 import webbpsf
 from photutils import CircularAperture, EPSFBuilder, find_peaks, CircularAnnulus
 from photutils.detection import DAOStarFinder, IRAFStarFinder
@@ -177,7 +178,11 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     #medfilt_masked = median_filter(medfilt_masked, size=[9,9])
 
     # now that we've masked out the stars, we fill back in the star positions by interpolating into them by smoothing the background
-    conv = convolve(masked_data, kernel=Gaussian2DKernel(fwhm_pix, x_size=np.ceil(10*fwhm_pix)), nan_treatment='interpolate')
+    xsize = np.ceil(10*fwhm_pix)
+    if xsize % 2 == 0:
+        xsize += 1
+    kernel = Gaussian2DKernel(fwhm_pix, x_size=xsize)
+    conv = convolve(masked_data, kernel=kernel, nan_treatment='interpolate')
     log.info(f"Masked convolution done at {time.time()-t0:0.1f}s")
 
     #medfilt_masked[np.isnan(medfilt_masked)] = conv[np.isnan(medfilt_masked)]
@@ -209,7 +214,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     stars_tbl['x'] = stars_shallow_conv['xcentroid'][~bad_shallow]
     stars_tbl['y'] = stars_shallow_conv['ycentroid'][~bad_shallow]
 
-    nddata = NDData(data=filtered_data)
+    # extract_stars does poorly with nans
+    nddata = NDData(data=np.nan_to_num(filtered_data))
     sz = psf_size
     stars_ = extract_stars(nddata, stars_tbl, size=sz)
 
@@ -220,7 +226,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
                                                ])
 
     log.info(f"EPSF calculation beginning at {time.time()-t0:0.1f}s")
-    epsf_builder = EPSFBuilder(oversampling=4, maxiters=3, smoothing_kernel='quadratic')
+    epsf_builder = EPSFBuilder(oversampling=4, maxiters=10, smoothing_kernel='quadratic')
 
     epsf_quadratic_filtered, fitted_stars = epsf_builder(stars)
     log.info(f"EPSF calculation done at {time.time()-t0:0.1f}s")
@@ -272,6 +278,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
     if save_products:
         result_full.write(f'{path_prefix}/{filtername}_fullfield_ePSF_photometry.ecsv', overwrite=True)
+        result_full.write(f'{path_prefix}/{filtername}_fullfield_ePSF_photometry.fits', overwrite=True)
         fits.PrimaryHDU(data=resid, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed.fits', overwrite=True)
 
     resid_orig = photutils.psf.utils.subtract_psf(data, epsf_quadratic_filtered, result_full)
