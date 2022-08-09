@@ -220,6 +220,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     stars_ = extract_stars(nddata, stars_tbl, size=sz)
 
     # Remove off-center stars
+    # and stars with saturated pixels
     stars = photutils.psf.epsf_stars.EPSFStars([star for star in stars_
                                                 if np.unravel_index(np.argmax(star), star.shape) == (sz//2, sz//2)
                                                 and data[int(star.center[1]), int(star.center[0])] > 0 # don't want the ones we replaced
@@ -229,6 +230,9 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     epsf_builder = EPSFBuilder(oversampling=4, maxiters=10, smoothing_kernel='quadratic')
 
     epsf_quadratic_filtered, fitted_stars = epsf_builder(stars)
+    if save_products:
+        fits.PrimaryHDU(data=epsf_quadratic_filtered.data).writeto(f'{filtername}_ePSF_quadratic_filtered-background-subtracted.fits',
+                overwrite=True)
     log.info(f"EPSF calculation done at {time.time()-t0:0.1f}s")
 
 
