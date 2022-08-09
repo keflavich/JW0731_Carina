@@ -4,7 +4,7 @@ import numpy as np
 from scipy import ndimage
 from astropy.table import Table
 
-def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500):
+def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500, require_gradient=False):
     """
     Attempt to determine if a collection of blank pixels is actually a star by
     assuming the pixels closest to the center will be brighter than their
@@ -24,9 +24,10 @@ def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500):
     rind3 = ndimage.binary_dilation(labelmask, iterations=rindsize)
     rind3sum = data[slc][rind3 & ~labelmask].sum()
 
-    return (rind1sum > rind2sum) and rind3sum > min_flux
+    return ((rind1sum > rind2sum) or not require_gradient) and rind3sum > min_flux
 
-def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500, rindsize=3, *args, **kwargs):
+def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500,
+                 rindsize=3, require_gradient=False, *args, **kwargs):
     """
     Create a saturated star finder that can select on the number of saturated pixels and the
     distance from the edge of the image
