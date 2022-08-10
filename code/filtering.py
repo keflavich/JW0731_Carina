@@ -3,7 +3,7 @@ import regions
 import webbpsf
 from photutils import CircularAperture, EPSFBuilder, find_peaks, CircularAnnulus
 from photutils.detection import DAOStarFinder, IRAFStarFinder
-from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry
+from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry 
 import numpy as np
 import time
 from astropy.stats import mad_std
@@ -21,9 +21,12 @@ from astropy import table
 from tqdm.notebook import tqdm
 from astroquery.svo_fps import SvoFps
 from scipy.ndimage import median_filter
+from scipy import ndimage
 from astropy.stats import sigma_clipped_stats, SigmaClip
 from photutils.segmentation import detect_threshold, detect_sources
 from photutils.utils import circular_footprint
+import pylab as pl
+from astropy.visualization import simple_norm
 
 import os
 os.environ['WEBBPSF_PATH'] = '/orange/adamginsburg/jwst/webbpsf-data/'
@@ -73,6 +76,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     fwhm, fwhm_pix = get_fwhm(header)
     filtername = header['FILTER']
+    obsdate = header['DATE-OBS']
 
 
     ### First iteration: simple median filter to produce ePSF estimate
@@ -100,8 +104,9 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # make webbpsf
     nc = webbpsf.NIRCam()
-    nc.filter = filtername
+    nc.load_wss_opd_by_date(f'{obsdate}T00:00:00')
 
+    nc.filter = filtername
 
     # mask out the pixels that are saturated
     medfilt_sub[data==0] = np.nan
@@ -126,8 +131,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # total guess heuristics...
     psfmask1000 = pp > 0.001*pp.max()
-    psfmask100 = pp > 0.01*pp.max()
-    psfmask5pct = pp > 0.05*pp.max()
+    psfmask100 = ndimage.binary_erosion(ndimage.binary_dilation(pp > 0.01*pp.max()))
+    psfmask7pct = ndimage.binary_erosion(ndimage.binary_dilation(pp > 0.07*pp.max()))
 
 
     # find stars to mask out
@@ -150,13 +155,16 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     for row in stars_deep_conv:
         xc,yc = row['xcentroid'], row['ycentroid']
         #mreg = regions.CirclePixelRegion(regions.PixCoord(xc, yc), radius=fwhm_pix*1.5)
-        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=psf_size, height=psf_size)
+        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=31, height=31)
 
         msk = mreg.to_mask()
         slcs, sslcs = msk.get_overlap_slices(masked_data.shape)
         try:
             #masked_data[slcs][msk.data.astype('bool')] = np.nan
-            masked_data[slcs][psfmask5pct.astype('bool')[sslcs]] = np.nan
+            if row['flux'] > 10:
+                masked_data[slcs][psfmask100.astype('bool')[sslcs]] = np.nan
+            else:
+                masked_data[slcs][psfmask7pct.astype('bool')[sslcs]] = np.nan
 
         except IndexError:
             # border case
@@ -164,7 +172,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     for row in stars_shallow_conv:
         xc,yc = row['xcentroid'], row['ycentroid']
         #mreg = regions.CirclePixelRegion(regions.PixCoord(xc, yc), radius=15)
-        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=psf_size, height=psf_size)
+        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=31, height=31)
         msk = mreg.to_mask()
         slcs, sslcs = msk.get_overlap_slices(masked_data.shape)
         try:
@@ -238,6 +246,42 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
                 overwrite=True)
     log.info(f"EPSF calculation done at {time.time()-t0:0.1f}s")
 
+    # Compare  PSFs
+
+    oversample=1
+    grid = nc.psf_grid(num_psfs=16, all_detectors=False)
+    yy,xx = np.indices(epsf_quadratic_filtered.data.shape)
+    xc,yc = np.unravel_index(epsf_quadratic_filtered.data.argmax(), epsf_quadratic_filtered.data.shape)
+    grid.x_0 = xc/oversample
+    grid.y_0 = yc/oversample
+    grid.flux = 1
+    fitter = LevMarLSQFitter()
+    fitted_gridmod = fitter(model=grid, x=xx/oversample, y=yy/oversample, z=epsf_quadratic_filtered.data,)
+    gridmodpsf = (fitted_gridmod(xx/oversample, yy/oversample))
+
+    pl.figure(1, figsize=(16,5))
+    pl.clf()
+    ax = pl.subplot(1,3,1)
+    norm_epsf = simple_norm(epsf_quadratic_filtered.data, 'log', percent=99.)
+    ax.set_title(f"{filt} quadratic\nfrom median-filtered data")
+    im = ax.imshow(epsf_quadratic_filtered.data, norm=norm_epsf)
+    pl.colorbar(mappable=im)
+    ax.set_xlabel('X [px]', fontsize=20)
+    ax.set_ylabel('Y [px]', fontsize=20)
+    ax2 = pl.subplot(1,3,2)
+    ax2.set_title("WebbPSF model")
+    dd = gridmodpsf    
+    norm = simple_norm(dd, 'log', percent=99.)
+    im2 = ax2.imshow(dd, norm=norm)       
+    pl.colorbar(mappable=im2)
+    ax3 = pl.subplot(1,3,3)
+    ax3.set_title("Difference")
+    dd = (epsf_quadratic_filtered.data) - gridmodpsf
+    norm = simple_norm(dd, 'asinh', percent=99)
+    im3 = ax3.imshow(dd, norm=norm)
+    pl.colorbar(mappable=im3)
+    pl.savefig(f"{filtername}_ePSF_quadratic_filtered_vs_webbpsf.png")
+
 
     # ## Do the PSF photometry
     # 
@@ -269,12 +313,15 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
         return finstars
 
-    phot = IterativelySubtractedPSFPhotometry(finder=filtered_finder, group_maker=daogroup,
-                                              bkg_estimator=mmm_bkg,
-                                              #psf_model=psf_modelgrid[0],
-                                              psf_model=epsf_quadratic_filtered,
-                                              fitter=LevMarLSQFitter(),
-                                              niters=2, fitshape=(11, 11), aperture_radius=2*fwhm_pix)
+    phot = BasicPSFPhotometry(finder=filtered_finder,
+                              group_maker=daogroup,
+                              bkg_estimator=None, #mmm_bkg,
+                              #psf_model=psf_modelgrid[0],
+                              psf_model=epsf_quadratic_filtered,
+                              fitter=LevMarLSQFitter(),
+                              #niters=2,
+                              fitshape=(11, 11),
+                              aperture_radius=2*fwhm_pix)
 
 
     # operate on the full data
