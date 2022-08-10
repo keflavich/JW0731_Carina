@@ -263,7 +263,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     pl.clf()
     ax = pl.subplot(1,3,1)
     norm_epsf = simple_norm(epsf_quadratic_filtered.data, 'log', percent=99.)
-    ax.set_title(f"{filt} quadratic\nfrom median-filtered data")
+    ax.set_title(f"{filtername} quadratic\nfrom median-filtered data")
     im = ax.imshow(epsf_quadratic_filtered.data, norm=norm_epsf)
     pl.colorbar(mappable=im)
     ax.set_xlabel('X [px]', fontsize=20)
@@ -313,20 +313,32 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
         return finstars
 
-    phot = BasicPSFPhotometry(finder=filtered_finder,
-                              group_maker=daogroup,
+    log.info(f"Finding sources.  t={time.time()-t0:0.1f}")
+    star_list = filtered_finder(filtered_data)
+    log.info(f"Found {len(star_list)} sources.  t={time.time()-t0:0.1f}")
+
+    group_list = daogroup(star_list)
+    log.info(f"Found {len(group_list)} sources.  t={time.time()-t0:0.1f}")
+
+    # there may be fewer groups than stars
+    pb = ProgressBar(len(group_list))
+    lmfitter = LevMarLSQFitter()
+    def fitter(*args, **kwargs):
+        pb.update()
+        return lmfitter(*args, **kwargs)
+
+    phot = BasicPSFPhotometry(finder=None, #filtered_finder,
+                              group_maker=None,
                               bkg_estimator=None, #mmm_bkg,
                               #psf_model=psf_modelgrid[0],
                               psf_model=epsf_quadratic_filtered,
-                              fitter=LevMarLSQFitter(),
-                              #niters=2,
+                              fitter=fitter,
                               fitshape=(11, 11),
                               aperture_radius=2*fwhm_pix)
 
-
     # operate on the full data
     log.info(f"Doing full photometry.  t={time.time()-t0:0.1f}")
-    result_full = phot(np.nan_to_num(filtered_data))
+    result_full = phot(np.nan_to_num(filtered_data), init_guesses=star_groups)
     log.info(f"Done with full photometry.  t={time.time()-t0:0.1f}")
     resid = phot.get_residual_image()
     log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
