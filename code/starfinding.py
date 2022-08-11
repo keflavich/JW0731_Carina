@@ -1,8 +1,9 @@
-from scipy.ndimage import label, find_objects, center_of_mass, sum_labels 
+from scipy.ndimage import label, find_objects, center_of_mass, sum_labels
 from tqdm.notebook import tqdm
 import numpy as np
 from scipy import ndimage
 from astropy.table import Table
+from astropy import table
 
 def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500, require_gradient=False):
     """
@@ -70,4 +71,44 @@ def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500,
         tbl['ycentroid'] = [cc[0] for cc, ok in zip(coms, all_ok) if ok]
 
         return tbl
-    return saturated_finder        
+    return saturated_finder
+
+def iteratively_remove_saturated_stars(data, header,
+        fit_sizes=[251,101,101,51],
+        nsaturated=[(100,500), (50,100), (30,50), (0,30)],
+        min_flux=[1000, 1000, 1000, 1000],
+        ap_rad=[15, 15, 15, 5],
+        require_gradient=[False, False, False, True],
+        dilations=[1,1,1,0],
+        ):
+
+    nc = webbpsf.NIRCam()
+    nc.filter = get_filtername(header)
+    obsdate = header['DATE-OBS']
+    nc.load_wss_opd_by_date(f'{obsdate}T00:00:00')
+    big_grid = nrc.psf_grid(num_psfs=16, all_detectors=False, fov_pixels=512)
+
+    resid = data
+
+    results = []
+
+    for (minsz, maxsz), minflx, grad, fitsz, apsz, diliter in zip(nsaturated, min_flux, require_gradients, fit_size, ap_rad, dilations):
+        phot = BasicPSFPhotometry(finder=finder_maker(min_size=minsz, max_size=maxsz, require_gradients=grad, min_flux=minflx),
+                              group_maker=daogroup,
+                              bkg_estimator=None, # must be none or it un-saturates pixels
+                              #psf_model=epsf_model,
+                              psf_model=big_grid,
+                              fitter=LevMarLSQFitter(),
+                              fitshape=fitsz,
+                              aperture_radius=apsz*fwhm_pix)
+        if diliter > 0:
+            mask = ndimage.binary_dilation(data==0, iterations=diliter)
+        else:
+            mask = data==0
+
+        result = phot(resid, mask=mask)
+        results.append(result)
+
+        resid = phot.get_residual_image()
+
+    final_table = table.vstack(results)
