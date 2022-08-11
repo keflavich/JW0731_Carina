@@ -18,7 +18,7 @@ from astropy.nddata import NDData
 from photutils.background import MMMBackground, MADStdBackgroundRMS
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy import table
-from tqdm.notebook import tqdm
+from tqdm.autonotebook import tqdm
 from astroquery.svo_fps import SvoFps
 from scipy.ndimage import median_filter
 from scipy import ndimage
@@ -76,6 +76,18 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     fwhm, fwhm_pix = get_fwhm(header)
     filtername = header['FILTER']
+    filtername2 = header['PUPIL']
+    if filtername == 'CLEAR':
+        filtername = filtername2
+    elif filtername2 == 'CLEAR':
+        # do nothing here
+        pass
+    elif filtername2 != 'CLEAR':
+        # filtername is real, but so is filtername2
+        filtername = filtername2
+
+    assert filtername != 'CLEAR'
+
     obsdate = header['DATE-OBS']
 
 
@@ -317,28 +329,30 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     star_list = filtered_finder(filtered_data)
     log.info(f"Found {len(star_list)} sources.  t={time.time()-t0:0.1f}")
 
+    star_list['x_0'] = star_list['xcentroid']
+    star_list['y_0'] = star_list['ycentroid']
     group_list = daogroup(star_list)
     log.info(f"Found {len(group_list)} sources.  t={time.time()-t0:0.1f}")
 
     # there may be fewer groups than stars
-    pb = ProgressBar(len(group_list))
-    lmfitter = LevMarLSQFitter()
-    def fitter(*args, **kwargs):
-        pb.update()
-        return lmfitter(*args, **kwargs)
+    #pb = tqdm(len(group_list))
+    #lmfitter = LevMarLSQFitter()
+    #def fitter(*args, **kwargs):
+    #    pb.update()
+    #    return lmfitter(*args, **kwargs)
 
     phot = BasicPSFPhotometry(finder=None, #filtered_finder,
                               group_maker=None,
                               bkg_estimator=None, #mmm_bkg,
                               #psf_model=psf_modelgrid[0],
                               psf_model=epsf_quadratic_filtered,
-                              fitter=fitter,
+                              fitter=LevMarLSQFitter(),
                               fitshape=(11, 11),
                               aperture_radius=2*fwhm_pix)
 
     # operate on the full data
     log.info(f"Doing full photometry.  t={time.time()-t0:0.1f}")
-    result_full = phot(np.nan_to_num(filtered_data), init_guesses=star_groups)
+    result_full = phot(np.nan_to_num(filtered_data), init_guesses=group_list)
     log.info(f"Done with full photometry.  t={time.time()-t0:0.1f}")
     resid = phot.get_residual_image()
     log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
