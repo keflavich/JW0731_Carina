@@ -3,7 +3,7 @@ import regions
 import webbpsf
 from photutils import CircularAperture, EPSFBuilder, find_peaks, CircularAnnulus
 from photutils.detection import DAOStarFinder, IRAFStarFinder
-from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry 
+from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry
 import numpy as np
 import time
 from astropy.stats import mad_std
@@ -282,9 +282,9 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     ax.set_ylabel('Y [px]', fontsize=20)
     ax2 = pl.subplot(1,3,2)
     ax2.set_title("WebbPSF model")
-    dd = gridmodpsf    
+    dd = gridmodpsf
     norm = simple_norm(dd, 'log', percent=99.)
-    im2 = ax2.imshow(dd, norm=norm)       
+    im2 = ax2.imshow(dd, norm=norm)
     pl.colorbar(mappable=im2)
     ax3 = pl.subplot(1,3,3)
     ax3.set_title("Difference")
@@ -296,7 +296,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
 
     # ## Do the PSF photometry
-    # 
+    #
     # DAOGroup decides which subset of stars needs to be simultaneously fitted together - i.e., it deals with blended sources.
     daogroup = DAOGroup(5 * fwhm_pix)
     mmm_bkg = MMMBackground()
@@ -314,8 +314,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
         Wrap the star finder to reject bad stars
         """
         finstars = daofind_fin(data)
-        bad = ((finstars['roundness1'] > finstars['mag']*0.4/8+0.65) | (finstars['roundness1'] < finstars['mag']*-0.4/8-0.5) | 
-               (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) | 
+        bad = ((finstars['roundness1'] > finstars['mag']*0.4/8+0.65) | (finstars['roundness1'] < finstars['mag']*-0.4/8-0.5) |
+               (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) |
                (finstars['roundness2'] > finstars['mag']*0.4/8+0.55) | (finstars['roundness2'] < finstars['mag']*-0.4/8-0.5))
         finstars = finstars[~bad]
         finstars['id'] = np.arange(1, len(finstars)+1)
@@ -335,18 +335,18 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     log.info(f"Found {len(group_list)} sources.  t={time.time()-t0:0.1f}")
 
     # there may be fewer groups than stars
-    #pb = tqdm(len(group_list))
-    #lmfitter = LevMarLSQFitter()
-    #def fitter(*args, **kwargs):
-    #    pb.update()
-    #    return lmfitter(*args, **kwargs)
+    pb = tqdm(len(group_list))
+    class LevMarLSQFitter_pb(LevMarLSQFitter):
+        def __call__(self, *args, **kwargs):
+            pb.update()
+            return super().__call__(*args, **kwargs)
 
     phot = BasicPSFPhotometry(finder=None, #filtered_finder,
                               group_maker=None,
                               bkg_estimator=None, #mmm_bkg,
                               #psf_model=psf_modelgrid[0],
                               psf_model=epsf_quadratic_filtered,
-                              fitter=LevMarLSQFitter(),
+                              fitter=LevMarLSQFitter_pb(),
                               fitshape=(11, 11),
                               aperture_radius=2*fwhm_pix)
 
