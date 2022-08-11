@@ -18,11 +18,11 @@ def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500, require_gradien
 
     rind1 = ndimage.binary_dilation(labelmask, iterations=2).astype('bool')
     rind2 = ndimage.binary_dilation(rind1, iterations=2).astype('bool')
-    rind2sum = data[slc][rind2 & ~rind1].sum()
-    rind1sum = data[slc][rind1 & ~labelmask].sum()
+    rind2sum = np.nansum(data[slc][rind2 & ~rind1])
+    rind1sum = np.nansum(data[slc][rind1 & ~labelmask])
 
     rind3 = ndimage.binary_dilation(labelmask, iterations=rindsize)
-    rind3sum = data[slc][rind3 & ~labelmask].sum()
+    rind3sum = np.nansum(data[slc][rind3 & ~labelmask])
 
     return ((rind1sum > rind2sum) or not require_gradient) and rind3sum > min_flux
 
@@ -43,10 +43,10 @@ def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500,
             raise ValueError("No saturated sources found")
         slices = find_objects(sources)
 
-        coms = center_of_mass(saturated, sources, np.arange(nsources))
+        coms = center_of_mass(saturated, sources, np.arange(nsources)+1)
         coms = np.array(coms)
 
-        sizes = sum_labels(saturated, sources, np.arange(nsources))
+        sizes = sum_labels(saturated, sources, np.arange(nsources)+1)
         msfe = min_sep_from_edge
 
         sizes_ok = (sizes < max_size) & (sizes > min_size)
