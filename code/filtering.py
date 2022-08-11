@@ -294,7 +294,13 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     pl.colorbar(mappable=im3)
     pl.savefig(f"{filtername}_ePSF_quadratic_filtered_vs_webbpsf.png")
 
+    do_final_photometry(data, header, filtered_data, fwhm_pix,
+                        nsigma_threshold, epsf_quadratic_filtered, filtername,
+                        path_prefix)
 
+def do_final_photometry(data, header, filtered_data, fwhm_pix,
+                        nsigma_threshold, epsf_quadratic_filtered, filtername,
+                        path_prefix, ):
     # ## Do the PSF photometry
     #
     # DAOGroup decides which subset of stars needs to be simultaneously fitted together - i.e., it deals with blended sources.
@@ -315,8 +321,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
         """
         finstars = daofind_fin(data)
         bad = ((finstars['roundness1'] > finstars['mag']*0.4/8+0.65) | (finstars['roundness1'] < finstars['mag']*-0.4/8-0.5) |
-               (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) |
                (finstars['roundness2'] > finstars['mag']*0.4/8+0.55) | (finstars['roundness2'] < finstars['mag']*-0.4/8-0.5))
+               # this is a bad general criterion (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) |
         finstars = finstars[~bad]
         finstars['id'] = np.arange(1, len(finstars)+1)
 
