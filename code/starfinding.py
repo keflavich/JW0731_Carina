@@ -82,11 +82,15 @@ def iteratively_remove_saturated_stars(data, header,
         dilations=[1,1,1,0],
         ):
 
-    nc = webbpsf.NIRCam()
-    nc.filter = get_filtername(header)
+    if header['INSTRUME'].lower() == 'nircam':
+        psfgen = webbpsf.NIRCam()
+    elif header['INSTRUME'].lower() == 'miri':
+        psfgen = webbpsf.MIRI()
+
+    psfgen.filter = get_filtername(header)
     obsdate = header['DATE-OBS']
-    nc.load_wss_opd_by_date(f'{obsdate}T00:00:00')
-    big_grid = nrc.psf_grid(num_psfs=16, all_detectors=False, fov_pixels=512)
+    psfgen.load_wss_opd_by_date(f'{obsdate}T00:00:00')
+    big_grid = psfgen.psf_grid(num_psfs=16, all_detectors=False, fov_pixels=512)
 
     resid = data
 
@@ -112,3 +116,5 @@ def iteratively_remove_saturated_stars(data, header,
         resid = phot.get_residual_image()
 
     final_table = table.vstack(results)
+
+    return final_table, resid

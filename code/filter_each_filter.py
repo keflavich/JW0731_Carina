@@ -1,4 +1,5 @@
 from filtering import estimate_background
+from starfinding import iteratively_remove_saturated_stars
 import time
 from astropy.io import fits
 import os
@@ -8,11 +9,11 @@ basepath = '/orange/adamginsburg/jwst/jw02731/'
 
 
 filenames = [
+    'L3/t/jw02731-o001_t017_nircam_clear-f335m_i2d.fits',
+    'L3/t/jw02731-o001_t017_nircam_clear-f200w_i2d.fits',
     'L3/t/jw02731-o001_t017_nircam_f444w-f470n_i2d.fits',
     'L3/t/jw02731-o001_t017_nircam_clear-f187n_i2d.fits',
     'L3/t/jw02731-o001_t017_nircam_clear-f090w_i2d.fits',
-    'L3/t/jw02731-o001_t017_nircam_clear-f335m_i2d.fits',
-    'L3/t/jw02731-o001_t017_nircam_clear-f200w_i2d.fits',
     'L3/t/jw02731-o001_t017_nircam_clear-f444w_i2d.fits',
     'L3/t/jw02731-o002_t017_miri_f1130w_i2d.fits',
     'L3/t/jw02731-o002_t017_miri_f1280w_i2d.fits',
@@ -31,8 +32,18 @@ for fn_ in filenames:
     header.update(fh[1].header)
 
     t0 = time.time()
-    print(f"Started {fn} at t={t0:0.1f}")
+    print(f"Started {fn} saturated at t={t0:0.1f}")
 
-    estimate_background(data, header, path_prefix=f'{basepath}/background_estimation/')
+    saturated_table, saturated_removed = iteratively_remove_saturated_stars(data, header)
+
+    filtername = get_filtername(header)
+    path_prefix = f'{basepath}/background_estimation/'
+
+    fits.PrimaryHDU(data=saturated_removed, header=header).writeto(f'{path_prefix}/{filtername}_saturated_stars_removed.fits', overwrite=True)
+    saturated_table.write(f'{path_prefix}/{filtername}_saturated_stars_catalog.fits', overwrite=True)
+
+    print(f"Started {fn} background at t={t0:0.1f}")
+
+    estimate_background(saturated_removed, header, path_prefix=path_prefix)
 
     print(f"Finished {fn} at t={time.time()-t0:0.1f}")
