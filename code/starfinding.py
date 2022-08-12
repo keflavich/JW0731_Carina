@@ -1,9 +1,13 @@
 from scipy.ndimage import label, find_objects, center_of_mass, sum_labels
+from astropy.modeling.fitting import LevMarLSQFitter
+from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry 
 from tqdm.notebook import tqdm
 import numpy as np
 from scipy import ndimage
 from astropy.table import Table
 from astropy import table
+import webbpsf
+from filtering import get_filtername, get_fwhm
 
 def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500, require_gradient=False):
     """
@@ -84,20 +88,30 @@ def iteratively_remove_saturated_stars(data, header,
 
     if header['INSTRUME'].lower() == 'nircam':
         psfgen = webbpsf.NIRCam()
+        fwhm, fwhm_pix = get_fwhm(header, instrument_replacement='NIRCam')
     elif header['INSTRUME'].lower() == 'miri':
         psfgen = webbpsf.MIRI()
+        fwhm, fwhm_pix = get_fwhm(header, instrument_replacement='MIRI')
 
     psfgen.filter = get_filtername(header)
     obsdate = header['DATE-OBS']
     psfgen.load_wss_opd_by_date(f'{obsdate}T00:00:00')
     big_grid = psfgen.psf_grid(num_psfs=16, all_detectors=False, fov_pixels=512)
 
+    daogroup = DAOGroup(crit_separation=8)
+
     resid = data
 
     results = []
 
-    for (minsz, maxsz), minflx, grad, fitsz, apsz, diliter in zip(nsaturated, min_flux, require_gradients, fit_size, ap_rad, dilations):
-        phot = BasicPSFPhotometry(finder=finder_maker(min_size=minsz, max_size=maxsz, require_gradients=grad, min_flux=minflx),
+    for (minsz, maxsz), minflx, grad, fitsz, apsz, diliter in zip(nsaturated, min_flux, require_gradient, fit_sizes, ap_rad, dilations):
+        finder = finder_maker(min_size=minsz, max_size=maxsz, require_gradient=grad, min_flux=minflx)
+
+        sources = finder(data)
+        if len(sources) == 0:
+            continue
+
+        phot = BasicPSFPhotometry(finder=finder,
                               group_maker=daogroup,
                               bkg_estimator=None, # must be none or it un-saturates pixels
                               #psf_model=epsf_model,
