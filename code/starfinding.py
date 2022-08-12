@@ -6,6 +6,7 @@ import numpy as np
 from scipy import ndimage
 from astropy.table import Table
 from astropy import table
+from astropy import log
 import webbpsf
 from filtering import get_filtername, get_fwhm
 
@@ -107,8 +108,9 @@ def iteratively_remove_saturated_stars(data, header,
     for (minsz, maxsz), minflx, grad, fitsz, apsz, diliter in zip(nsaturated, min_flux, require_gradient, fit_sizes, ap_rad, dilations):
         finder = finder_maker(min_size=minsz, max_size=maxsz, require_gradient=grad, min_flux=minflx)
 
-        sources = finder(data)
+        sources = finder(data, mask=ndimage.binary_dilation(data==0, iterations=1))
         if len(sources) == 0:
+            log.warning(f"Skipped iteration with fit size={fitsz}, range={minsz}-{maxsz}")
             continue
 
         phot = BasicPSFPhotometry(finder=finder,
