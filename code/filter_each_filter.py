@@ -4,6 +4,7 @@ from starfinding import iteratively_remove_saturated_stars
 import time
 from astropy.io import fits
 from astropy import wcs
+from astropy import log
 import os
 import regions
 
@@ -30,7 +31,7 @@ rois = regions.Regions.read('/orange/adamginsburg/jwst/jw02731/ROIs.reg')
 r0, r1 = rois
 
 
-for fn_ in filenames:
+def do_all_filtering(fn_, **kwargs):
     fn = f'{basepath}/{fn_}'
     path_prefix = f'{basepath}/background_estimation_cutout/'
 
@@ -48,17 +49,21 @@ for fn_ in filenames:
     header.update(ww.to_header())
 
     t0 = time.time()
-    print(f"Started {fn} saturated at t={t0:0.1f}")
+    log.info(f"Started {fn} saturated at t={t0:0.1f}")
 
-    saturated_table, saturated_removed = iteratively_remove_saturated_stars(data, header)
+    saturated_table, saturated_removed = iteratively_remove_saturated_stars(data, header, path_prefix=path_prefix)
 
     filtername = get_filtername(header)
 
     fits.PrimaryHDU(data=saturated_removed, header=header).writeto(f'{path_prefix}/{filtername}_saturated_stars_removed.fits', overwrite=True)
     saturated_table.write(f'{path_prefix}/{filtername}_saturated_stars_catalog.fits', overwrite=True)
 
-    print(f"Started {fn} background at t={t0:0.1f}")
+    log.info(f"Started {fn} background at t={t0:0.1f}")
 
-    estimate_background(saturated_removed, header, path_prefix=path_prefix)
+    estimate_background(saturated_removed, header, path_prefix=path_prefix, **kwargs)
 
-    print(f"Finished {fn} at t={time.time()-t0:0.1f}")
+    log.info(f"Finished {fn} at t={time.time()-t0:0.1f}")
+
+if __name__ == "__main__":
+    for fn_ in filenames:
+        do_all_filtering(fn_)

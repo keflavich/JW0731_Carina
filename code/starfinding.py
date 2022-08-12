@@ -7,8 +7,11 @@ from scipy import ndimage
 from astropy.table import Table
 from astropy import table
 from astropy import log
-import webbpsf
 from filtering import get_filtername, get_fwhm
+
+import os
+os.environ['WEBBPSF_PATH'] = '/orange/adamginsburg/jwst/webbpsf-data/'
+import webbpsf
 
 def is_star(data, sources, srcid, slc, rindsize=3, min_flux=500, require_gradient=False):
     """
@@ -79,13 +82,14 @@ def finder_maker(max_size=100, min_size=0, min_sep_from_edge=20, min_flux=500,
     return saturated_finder
 
 def iteratively_remove_saturated_stars(data, header,
-        fit_sizes=[251,101,101,51],
-        nsaturated=[(100,500), (50,100), (30,50), (0,30)],
-        min_flux=[1000, 1000, 1000, 1000],
-        ap_rad=[15, 15, 15, 5],
-        require_gradient=[False, False, False, True],
-        dilations=[1,1,1,0],
-        ):
+                                       fit_sizes=[251,101,101,51],
+                                       nsaturated=[(100,500), (50,100), (30,50), (0,30)],
+                                       min_flux=[1000, 1000, 1000, 1000],
+                                       ap_rad=[15, 15, 15, 5],
+                                       require_gradient=[False, False, False, True],
+                                       dilations=[1,1,1,0],
+                                       path_prefix='.'
+                                      ):
 
     if header['INSTRUME'].lower() == 'nircam':
         psfgen = webbpsf.NIRCam()
@@ -93,11 +97,29 @@ def iteratively_remove_saturated_stars(data, header,
     elif header['INSTRUME'].lower() == 'miri':
         psfgen = webbpsf.MIRI()
         fwhm, fwhm_pix = get_fwhm(header, instrument_replacement='MIRI')
+    instrument = header['INSTRUME']
+    filtername = get_filtername(header)
 
-    psfgen.filter = get_filtername(header)
+    psfgen.filter = filtername
     obsdate = header['DATE-OBS']
     psfgen.load_wss_opd_by_date(f'{obsdate}T00:00:00')
-    big_grid = psfgen.psf_grid(num_psfs=16, all_detectors=False, fov_pixels=512)
+
+    npsf = 16
+    oversample = 2
+    fov_pixels = 512
+    psf_fn = f'{path_prefix}/{instrument.lower()}_{filtername}_samp{oversample}_nspsf{npsf}_npix{fov_pixels}.fits'
+    if os.path.exists(psf_fn):
+        # As a file
+        big_grid = to_griddedpsfmodel(psf_fn)  # file created 2 cells above
+    else:
+        big_grid = psfgen.psf_grid(num_psfs=npsf, oversample=oversample,
+                                   all_detectors=False, fov_pixels=fov_pixels,
+                                   save=True, outfile=psf_fn)
+
+    # We force the centroid to be fixed b/c the fitter doesn't do a great job with this...
+    # ....this is not optimal...
+    big_grid.fixed['x_0'] = True
+    big_grid.fixed['y_0'] = True
 
     daogroup = DAOGroup(crit_separation=8)
 

@@ -1,9 +1,8 @@
 import photutils
 import regions
-import webbpsf
 from photutils import CircularAperture, EPSFBuilder, find_peaks, CircularAnnulus
 from photutils.detection import DAOStarFinder, IRAFStarFinder
-from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry 
+from photutils.psf import DAOGroup, IntegratedGaussianPRF, extract_stars, IterativelySubtractedPSFPhotometry, BasicPSFPhotometry
 import numpy as np
 import time
 from astropy.stats import mad_std
@@ -31,6 +30,7 @@ from astropy.visualization import simple_norm
 import os
 os.environ['WEBBPSF_PATH'] = '/orange/adamginsburg/jwst/webbpsf-data/'
 import webbpsf
+from webbpsf.utils import to_griddedpsfmodel
 
 
 def get_fwhm(header, instrument_replacement='NIRCam'):
@@ -70,15 +70,17 @@ def get_fwhm(header, instrument_replacement='NIRCam'):
 def get_filtername(header):
 
     filtername = header['FILTER']
-    filtername2 = header['PUPIL']
-    if filtername == 'CLEAR':
-        filtername = filtername2
-    elif filtername2 == 'CLEAR':
-        # do nothing here
-        pass
-    elif filtername2 != 'CLEAR':
-        # filtername is real, but so is filtername2
-        filtername = filtername2
+    if 'PUPIL' in header:
+        # only for NIRCAM
+        filtername2 = header['PUPIL']
+        if filtername == 'CLEAR':
+            filtername = filtername2
+        elif filtername2 == 'CLEAR':
+            # do nothing here
+            pass
+        elif filtername2 != 'CLEAR':
+            # filtername is real, but so is filtername2
+            filtername = filtername2
 
     assert filtername != 'CLEAR'
 
@@ -86,13 +88,14 @@ def get_filtername(header):
 
 def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=False, save_products=True,
                         path_prefix='./',
-                        psf_size=31, nsigma_threshold=10):
+                        psf_size=31, nsigma_threshold=5):
     """
     holy side effects batman
     """
 
     fwhm, fwhm_pix = get_fwhm(header)
     filtername = get_filtername(header)
+    instrument = header['INSTRUME']
 
     obsdate = header['DATE-OBS']
 
@@ -170,6 +173,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # Use the original data, unfiltered and unconvolved, because we're masking out the stars
     masked_data = data.copy()
+    starfish_mask = np.zeros_like(data, dtype='bool')
     for row in stars_deep_conv:
         xc,yc = row['xcentroid'], row['ycentroid']
         #mreg = regions.CirclePixelRegion(regions.PixCoord(xc, yc), radius=fwhm_pix*1.5)
@@ -190,12 +194,18 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     for row in stars_shallow_conv:
         xc,yc = row['xcentroid'], row['ycentroid']
         #mreg = regions.CirclePixelRegion(regions.PixCoord(xc, yc), radius=15)
-        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=31, height=31)
+        msksz = 31
+        mreg = regions.RectanglePixelRegion(regions.PixCoord(xc, yc), width=msksz, height=msksz)
         msk = mreg.to_mask()
         slcs, sslcs = msk.get_overlap_slices(masked_data.shape)
         try:
             #masked_data[slcs][msk.data.astype('bool')] = np.nan
             masked_data[slcs][psfmask1000.astype('bool')[sslcs]] = np.nan
+
+            # we want to allow stars at the center of the mask, but not in its wings
+            center_false = psfmask1000.astype('bool').copy()
+            center_false[msksz//2, msksz//2] = False
+            starfish_mask[slcs][center_false[sslcs]] = True
         except IndexError:
             # border case
             pass
@@ -266,43 +276,59 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # Compare  PSFs
 
-    oversample=1
-    grid = nc.psf_grid(num_psfs=16, all_detectors=False)
+    npsf = 16
+    oversample = 2
+    fov_pixels = 256
+    psf_fn = f'{path_prefix}/{instrument.lower()}_{filtername}_samp{oversample}_nspsf{npsf}_npix{fov_pixels}.fits'
+    if os.path.exists(psf_fn):
+        # As a file
+        grid = to_griddedpsfmodel(psf_fn)
+    elif os.path.exists(psf_fn.replace(".fits", "_nrca5.fits")):
+        # apparently even with outfile specified, nrca5 gets appended?
+        grid = to_griddedpsfmodel(psf_fn.replace(".fits", "_nrca5.fits"))
+    else:
+        grid = nc.psf_grid(num_psfs=npsf, oversample=oversample,
+                           all_detectors=False, save=True, outfile=psf_fn,
+                           fov_pixels=fov_pixels)
+
     yy,xx = np.indices(epsf_quadratic_filtered.data.shape)
     xc,yc = np.unravel_index(epsf_quadratic_filtered.data.argmax(), epsf_quadratic_filtered.data.shape)
     grid.x_0 = xc/oversample
     grid.y_0 = yc/oversample
     grid.flux = 1
     fitter = LevMarLSQFitter()
-    fitted_gridmod = fitter(model=grid, x=xx/oversample, y=yy/oversample, z=epsf_quadratic_filtered.data,)
-    gridmodpsf = (fitted_gridmod(xx/oversample, yy/oversample))
+
+    # there's some hoop-jumping here to get the PSFs to be comparable; I really
+    # hope the PSF photometry toolkit understands how to use these PSFs...
+    fitted_gridmod = fitter(model=grid, x=xx/oversample/2 + grid.x_0/oversample, y=yy/oversample/2 + grid.y_0/oversample, z=epsf_quadratic_filtered.data,)
+    gridmodpsf = (fitted_gridmod(xx/oversample/2 + grid.x_0/oversample, yy/oversample/2 + grid.y_0/oversample))    
 
     pl.figure(1, figsize=(16,5))
     pl.clf()
     ax = pl.subplot(1,3,1)
     norm_epsf = simple_norm(epsf_quadratic_filtered.data, 'log', percent=99.)
     ax.set_title(f"{filtername} quadratic\nfrom median-filtered data")
-    im = ax.imshow(epsf_quadratic_filtered.data, norm=norm_epsf)
+    im = ax.imshow(epsf_quadratic_filtered.data, norm=norm_epsf, origin='lower')
     pl.colorbar(mappable=im)
     ax.set_xlabel('X [px]', fontsize=20)
     ax.set_ylabel('Y [px]', fontsize=20)
     ax2 = pl.subplot(1,3,2)
     ax2.set_title("WebbPSF model")
-    dd = gridmodpsf    
+    dd = gridmodpsf
     norm = simple_norm(dd, 'log', percent=99.)
-    im2 = ax2.imshow(dd, norm=norm)       
+    im2 = ax2.imshow(dd, norm=norm, origin='lower')
     pl.colorbar(mappable=im2)
     ax3 = pl.subplot(1,3,3)
     ax3.set_title("Difference")
     dd = (epsf_quadratic_filtered.data) - gridmodpsf
     norm = simple_norm(dd, 'asinh', percent=99)
-    im3 = ax3.imshow(dd, norm=norm)
+    im3 = ax3.imshow(dd, norm=norm, origin='lower')
     pl.colorbar(mappable=im3)
     pl.savefig(f"{filtername}_ePSF_quadratic_filtered_vs_webbpsf.png")
 
 
     # ## Do the PSF photometry
-    # 
+    #
     # DAOGroup decides which subset of stars needs to be simultaneously fitted together - i.e., it deals with blended sources.
     daogroup = DAOGroup(5 * fwhm_pix)
     mmm_bkg = MMMBackground()
@@ -310,7 +336,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     filtered_errest = stats.mad_std(filtered_data, ignore_nan=True)
 
     daofind_fin = DAOStarFinder(threshold=nsigma_threshold * filtered_errest, fwhm=fwhm_pix, roundhi=1.0, roundlo=-1.0,
-                                sharplo=0.30, sharphi=1.40)
+                                sharplo=0.30, sharphi=1.40, mask=starfish_mask)
     finstars = daofind_fin(filtered_data)
     log.info(f"First-pass starfinding calculation done at {time.time()-t0:0.1f}s.  Found {len(finstars)} stars.")
 
@@ -320,8 +346,8 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
         Wrap the star finder to reject bad stars
         """
         finstars = daofind_fin(data)
-        bad = ((finstars['roundness1'] > finstars['mag']*0.4/8+0.65) | (finstars['roundness1'] < finstars['mag']*-0.4/8-0.5) | 
-               # bad! (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) | 
+        bad = ((finstars['roundness1'] > finstars['mag']*0.4/8+0.65) | (finstars['roundness1'] < finstars['mag']*-0.4/8-0.5) |
+               # bad! (finstars['sharpness'] < 0.48) | (finstars['sharpness'] > 0.6) |
                (finstars['roundness2'] > finstars['mag']*0.4/8+0.55) | (finstars['roundness2'] < finstars['mag']*-0.4/8-0.5))
         finstars = finstars[~bad]
         finstars['id'] = np.arange(1, len(finstars)+1)
@@ -332,7 +358,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
         return finstars
 
     log.info(f"Finding sources.  t={time.time()-t0:0.1f}")
-    star_list = filtered_finder(filtered_data)
+    star_list = finstars #filtered_finder(filtered_data)
     log.info(f"Found {len(star_list)} sources.  t={time.time()-t0:0.1f}")
 
     star_list['x_0'] = star_list['xcentroid']
@@ -370,9 +396,24 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     resid_orig = photutils.psf.utils.subtract_psf(data, epsf_quadratic_filtered, result_full)
     log.info(f"Done with final star subtraction from original data.  t={time.time()-t0:0.1f}")
     if save_products:
-        fits.PrimaryHDU(data=resid_orig, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed.fits', overwrite=True)
+        fits.PrimaryHDU(data=resid_orig, header=header).writeto(f'{path_prefix}/{filtername}_originalimage_stars_removed.fits', overwrite=True)
 
     resid_orig_filled = photutils.psf.utils.subtract_psf(datafilt_conv_psf, epsf_quadratic_filtered, result_full)
     log.info(f"Done with final star subtraction from original filled in data.  t={time.time()-t0:0.1f}")
     if save_products:
         fits.PrimaryHDU(data=resid_orig_filled, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_filled_then_removed.fits', overwrite=True)
+
+
+def make_noisemap(data, noisemap_filter_size=31, noisefunc=mad_std):
+    """
+    Create a noise map by applying a mad_std filter to the image.
+
+    This is best done on an image that has only stuff considered noise.
+    """
+    yy,xx = np.indices([noisemap_filter_size, noisemap_filter_size])
+    rr = ((xx-xx.max()/2)**2 + (yy-yy.max()/2)**2)**0.5
+    footprint = rr<noisemap_filter_size/2
+    noisemap = ndimage.generic_filter(data, noisefunc,
+                                      footprint=footprint)
+
+    return noisemap
