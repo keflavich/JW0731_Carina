@@ -118,8 +118,8 @@ def iteratively_remove_saturated_stars(data, header,
 
     # We force the centroid to be fixed b/c the fitter doesn't do a great job with this...
     # ....this is not optimal...
-    big_grid.fixed['x_0'] = True
-    big_grid.fixed['y_0'] = True
+    #big_grid.fixed['x_0'] = True
+    #big_grid.fixed['y_0'] = True
 
     daogroup = DAOGroup(crit_separation=8)
 
