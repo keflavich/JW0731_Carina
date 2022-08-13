@@ -60,7 +60,10 @@ def do_all_filtering(fn_, **kwargs):
 
     log.info(f"Started {fn} background at t={t0:0.1f}")
 
-    estimate_background(saturated_removed, header, path_prefix=path_prefix, **kwargs)
+    final_table, resid = estimate_background(saturated_removed, header, path_prefix=path_prefix, **kwargs)
+
+    final_table = table.vstack([final_table, saturated_table])
+    final_table.write(f'{path_prefix}/{filtername}_saturated_and_unsaturated_stars_catalog.fits', overwrite=True)
 
     log.info(f"Finished {fn} at t={time.time()-t0:0.1f}")
 

@@ -381,7 +381,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
                               group_maker=None,
                               bkg_estimator=None, #mmm_bkg,
                               #psf_model=psf_modelgrid[0],
-                              psf_model=epsf_quadratic_filtered,
+                              psf_model=grid,
                               fitter=LevMarLSQFitter(),
                               fitshape=(11, 11),
                               aperture_radius=2*fwhm_pix)
@@ -393,19 +393,56 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     resid = phot.get_residual_image()
     log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
     if save_products:
-        result_full.write(f'{path_prefix}/{filtername}_fullfield_ePSF_photometry.ecsv', overwrite=True)
-        result_full.write(f'{path_prefix}/{filtername}_fullfield_ePSF_photometry.fits', overwrite=True)
+        result_full.write(f'{path_prefix}/{filtername}_fullfield_WebbPSF_photometry.ecsv', overwrite=True)
+        result_full.write(f'{path_prefix}/{filtername}_fullfield_WebbPSF_photometry.fits', overwrite=True)
         fits.PrimaryHDU(data=resid, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed.fits', overwrite=True)
 
-    resid_orig = photutils.psf.utils.subtract_psf(data, epsf_quadratic_filtered, result_full)
+    resid_orig = photutils.psf.utils.subtract_psf(data, grid, result_full)
     log.info(f"Done with final star subtraction from original data.  t={time.time()-t0:0.1f}")
     if save_products:
         fits.PrimaryHDU(data=resid_orig, header=header).writeto(f'{path_prefix}/{filtername}_originalimage_stars_removed.fits', overwrite=True)
 
-    resid_orig_filled = photutils.psf.utils.subtract_psf(datafilt_conv_psf, epsf_quadratic_filtered, result_full)
+    resid_orig_filled = photutils.psf.utils.subtract_psf(datafilt_conv_psf, grid, result_full)
     log.info(f"Done with final star subtraction from original filled in data.  t={time.time()-t0:0.1f}")
     if save_products:
         fits.PrimaryHDU(data=resid_orig_filled, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_filled_then_removed.fits', overwrite=True)
+
+    starsubtracted_background = convolve(resid_original, kernel=kernel, nan_treatment='interpolate')
+    log.info(f"Done smoothing star-subtracted image for new background.  t={time.time()-t0:0.1f}")
+    if save_products:
+        fits.PrimaryHDU(data=resid_orig_filled,
+                        header=header).writeto(f'{path_prefix}/{filtername}_background_convolved_from_starsubtracted.fits',
+                                               overwrite=True)
+
+    filtered_data_two = data_replacenans - starsubtracted_background
+    if save_products:
+        fits.PrimaryHDU(data=filtered_data,
+                        header=header).writeto(f'{path_prefix}/{filtername}_starsubtraction-based-background-subtraction.fits',
+                                               overwrite=True)
+
+    log.info(f"Doing full photometry after star subtraction background.  t={time.time()-t0:0.1f}")
+    finstars2 = daofind_fin(filtered_data_two)
+    star_list2 = finstars2
+    log.info(f"Found {len(star_list2)} sources.  t={time.time()-t0:0.1f}")
+
+    star_list2['x_0'] = star_list2['xcentroid']
+    star_list2['y_0'] = star_list2['ycentroid']
+    group_list2 = daogroup(star_list2)
+    result_full2 = phot(np.nan_to_num(filtered_data_two), init_guesses=group_list2)
+    log.info(f"Done with full photometry.  t={time.time()-t0:0.1f}")
+    resid2 = phot.get_residual_image()
+    log.info(f"Done with final residual estimate.  t={time.time()-t0:0.1f}")
+    if save_products:
+        result_full2.write(f'{path_prefix}/{filtername}_fullfield_WebbPSF_photometry_iter2.ecsv', overwrite=True)
+        result_full2.write(f'{path_prefix}/{filtername}_fullfield_WebbPSF_photometry_iter2.fits', overwrite=True)
+        fits.PrimaryHDU(data=resid2, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_removed_iter2.fits', overwrite=True)
+
+    resid_orig2 = photutils.psf.utils.subtract_psf(data, grid, result_full)
+    log.info(f"Done with second final star subtraction from original data.  t={time.time()-t0:0.1f}")
+    if save_products:
+        fits.PrimaryHDU(data=resid_orig2, header=header).writeto(f'{path_prefix}/{filtername}_originalimage_stars_removed_iter2.fits', overwrite=True)
+
+    return result_full2, resid_orig2
 
 
 def make_noisemap(data, noisemap_filter_size=31, noisefunc=mad_std):
