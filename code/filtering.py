@@ -158,14 +158,17 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # find stars to mask out
     err_est_conv = stats.mad_std(datafilt_conv_psf)
-    daofind_deep = DAOStarFinder(threshold=10 * err_est_conv, fwhm=fwhm_pix*2**0.5, roundhi=0.25, roundlo=-1.0,
-                                sharplo=0.30, sharphi=1.40)
+    daofind_deep = DAOStarFinder(threshold=10 * err_est_conv,
+                                 fwhm=fwhm_pix*2**0.5, roundhi=0.25,
+                                 roundlo=-1.0, sharplo=0.30, sharphi=1.40)
 
     stars_deep_conv = daofind_deep(datafilt_conv_psf)
 
     # allow any shape at all, but strong cut on S/N
-    daofind_shallow_conv = DAOStarFinder(threshold=250 * err_est_conv, fwhm=fwhm_pix, roundhi=4, roundlo=-1.0,
-                                sharplo=0.001, sharphi=4.40)
+    daofind_shallow_conv = DAOStarFinder(threshold=250 * err_est_conv,
+                                         fwhm=fwhm_pix, roundhi=4,
+                                         roundlo=-1.0, sharplo=0.001,
+                                         sharphi=4.40)
 
     stars_shallow_conv = daofind_shallow_conv(datafilt_conv_psf)
     log.info(f"Starfinding for mask done at {time.time()-t0:0.1f}s.  n_shallow={len(stars_shallow_conv)}, n_deep={len(stars_deep_conv)}")
@@ -335,9 +338,10 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     filtered_errest = stats.mad_std(filtered_data, ignore_nan=True)
 
-    daofind_fin = DAOStarFinder(threshold=nsigma_threshold * filtered_errest, fwhm=fwhm_pix, roundhi=1.0, roundlo=-1.0,
-                                sharplo=0.30, sharphi=1.40, mask=starfish_mask)
-    finstars = daofind_fin(filtered_data)
+    daofind_fin = DAOStarFinder(threshold=nsigma_threshold * filtered_errest,
+                                fwhm=fwhm_pix, roundhi=1.0, roundlo=-1.0,
+                                sharplo=0.30, sharphi=1.40)
+    finstars = daofind_fin(filtered_data, mask=starfish_mask)
     log.info(f"First-pass starfinding calculation done at {time.time()-t0:0.1f}s.  Found {len(finstars)} stars.")
 
     # criteria are based on examining some plots; they probably don't hold universally
