@@ -88,7 +88,7 @@ def get_filtername(header):
 
 def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=False, save_products=True,
                         path_prefix='./',
-                        psf_size=31, nsigma_threshold=5):
+                        psf_size=31, nsigma_threshold=6):
     """
     holy side effects batman
     """
@@ -147,7 +147,15 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
 
     # create a PSF-based mask to mask out diffraction spikes
     # (the psf_size+1 here is a bit of a hack that might break if you try to put in different PSF sizes...)
-    pp = nc.calc_psf(oversample=1, fov_pixels=psf_size+1)[0].data
+    oversample = 1
+    psf_fn = f'{path_prefix}/{instrument.lower()}_{filtername}_samp{oversample}_simple_psf.fits'
+    if os.path.exists(psf_fn):
+        # As a file
+        pp = fits.getdata(psf_fn)  # file created 2 cells above
+    else:
+        psf_hdu = nc.calc_psf(oversample=1, fov_pixels=psf_size+1)
+        psf_hdu.writeto(psf_fn)
+        pp = psf_hdu[0].data
     log.info(f"Calculating PSF for mask done at {time.time()-t0:0.1f}s")
 
     # total guess heuristics...
@@ -407,7 +415,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
     if save_products:
         fits.PrimaryHDU(data=resid_orig_filled, header=header).writeto(f'{path_prefix}/{filtername}_psfphot_stars_filled_then_removed.fits', overwrite=True)
 
-    starsubtracted_background = convolve(resid_original, kernel=kernel, nan_treatment='interpolate')
+    starsubtracted_background = convolve(resid_orig, kernel=kernel, nan_treatment='interpolate')
     log.info(f"Done smoothing star-subtracted image for new background.  t={time.time()-t0:0.1f}")
     if save_products:
         fits.PrimaryHDU(data=resid_orig_filled,
