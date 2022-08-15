@@ -88,7 +88,7 @@ def get_filtername(header):
 
 def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=False, save_products=True,
                         path_prefix='./',
-                        psf_size=31, nsigma_threshold=6):
+                        psf_size=31, nsigma_threshold=7):
     """
     holy side effects batman
     """
@@ -298,6 +298,7 @@ def estimate_background(data, header, medfilt_size=[15,15], do_segment_mask=Fals
         # apparently even with outfile specified, nrca5 gets appended?
         grid = to_griddedpsfmodel(psf_fn.replace(".fits", "_nrca5.fits"))
     else:
+        log.info(f"filtering: Calculating grid for psf_fn={psf_fn}")
         grid = nc.psf_grid(num_psfs=npsf, oversample=oversample,
                            all_detectors=False, save=True, outfile=psf_fn,
                            fov_pixels=fov_pixels)

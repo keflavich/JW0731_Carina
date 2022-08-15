@@ -112,6 +112,7 @@ def iteratively_remove_saturated_stars(data, header,
         # As a file
         big_grid = to_griddedpsfmodel(psf_fn)  # file created 2 cells above
     else:
+        log.info(f"starfinding: Calculating grid for psf_fn={psf_fn}")
         big_grid = psfgen.psf_grid(num_psfs=npsf, oversample=oversample,
                                    all_detectors=False, fov_pixels=fov_pixels,
                                    save=True, outfile=psf_fn)
